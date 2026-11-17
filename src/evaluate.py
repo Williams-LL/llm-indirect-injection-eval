@@ -1,13 +1,20 @@
+import argparse
 import json
 import os
 import re
 import time
 import torch
 from tqdm import tqdm
-from agent import load_model, SandboxEnvironment, TOOLS_SCHEMA, parse_tool_calls, CANARY_SECRET, ALLOWED_RECIPIENTS
+from agent import (
+    load_model,
+    SandboxEnvironment,
+    TOOLS_SCHEMA,
+    parse_tool_calls,
+    CANARY_SECRET,
+    ALLOWED_RECIPIENTS,
+)
 
 BENCHMARK_PATH = "benchmark/test_cases.jsonl"
-RESULTS_PATH = "results/arm0_baseline_qwen7b.jsonl"
 
 REFUSAL_PATTERNS = [
     "cannot fulfill",
@@ -155,26 +162,30 @@ def compute_summary_metrics(results: list):
     print("=" * 55)
 
 
-def run_benchmark():
-    os.makedirs(os.path.dirname(RESULTS_PATH), exist_ok=True)
+def run_benchmark(model_id: str, results_path: str):
+    os.makedirs(os.path.dirname(results_path), exist_ok=True)
     with open(BENCHMARK_PATH, "r", encoding="utf-8") as f:
         cases = [json.loads(line) for line in f]
 
     # Resume from checkpoint if interrupted
     completed_ids = set()
     results = []
-    if os.path.exists(RESULTS_PATH):
-        with open(RESULTS_PATH, "r", encoding="utf-8") as f:
+    if os.path.exists(results_path):
+        with open(results_path, "r", encoding="utf-8") as f:
             for line in f:
                 rec = json.loads(line)
                 results.append(rec)
                 completed_ids.add(rec["case_id"])
-        print(f"Resuming from checkpoint: {len(completed_ids)}/{len(cases)} cases already completed.")
+        print(
+            f"Resuming from checkpoint: {len(completed_ids)}/{len(cases)} cases"
+            " already completed."
+        )
 
-    tokenizer, model = load_model("Qwen/Qwen2.5-7B-Instruct")
+    print(f"Loading model: {model_id} -> Saving to: {results_path}")
+    tokenizer, model = load_model(model_id)
 
-    with open(RESULTS_PATH, "a", encoding="utf-8") as out_f:
-        for case in tqdm(cases, desc="Evaluating Arm 0 Baseline"):
+    with open(results_path, "a", encoding="utf-8") as out_f:
+        for case in tqdm(cases, desc=f"Evaluating {model_id.split('/')[-1]}"):
             if case["case_id"] in completed_ids:
                 continue
             res = evaluate_single_trial(tokenizer, model, case)
@@ -186,4 +197,21 @@ def run_benchmark():
 
 
 if __name__ == "__main__":
-    run_benchmark()
+    parser = argparse.ArgumentParser(
+        description="Run indirect prompt injection benchmark."
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="Qwen/Qwen2.5-7B-Instruct",
+        help="HuggingFace model ID to evaluate",
+    )
+    parser.add_argument(
+        "--output",
+        type=str,
+        default="results/arm0_baseline_qwen7b.jsonl",
+        help="Output JSONL file path",
+    )
+    args = parser.parse_args()
+
+    run_benchmark(model_id=args.model, results_path=args.output)
